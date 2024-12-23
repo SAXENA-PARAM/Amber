@@ -1,0 +1,360 @@
+// This  is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  // previewFeatures = ["tracing"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DIRECT_DATABASE_URL")
+//  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+
+enum AdminLevel {
+  super_admin
+  course_admin
+  support_admin
+}
+
+enum Status {
+  active
+  inactive
+  suspended
+}
+
+enum EducationLevel {
+  SCHOOL
+  UNDERGRADUATE
+  POSTGRADUATE
+}
+
+enum SchoolingYear {
+  ELEVENTH
+  TWELFTH
+}
+
+enum SchoolStream {
+  SCIENCE
+  COMMERCE
+  ARTS
+}
+
+enum Degree {
+  BTECH
+  MTECH
+  BSC
+  MSC
+  PHD
+}
+
+enum StudyYear {
+  FIRST
+  SECOND
+  THIRD
+  FOURTH
+}
+
+enum Specialization {
+  COMPUTER_SCIENCE
+  MECHANICAL_ENGINEERING
+  ELECTRICAL_ENGINEERING
+  CIVIL_ENGINEERING
+  CHEMISTRY
+  PHYSICS
+}
+enum CommentType {
+  INTRO
+  DEFAULT
+ }
+// enum VoteType {
+//   UPVOTE
+//   DOWNVOTE
+// }
+
+enum Currency {
+  USD
+  EUR
+  GBP
+  INR
+  AUD
+  // Add more ISO currency codes as needed
+}
+
+enum ContentType {
+  QUIZ
+  LECTURE
+}
+
+model Course {
+  id              Int             @id @default(autoincrement())
+  insId           Int
+  ins             Instructor      @relation(fields: [insId] , references: [id])
+  title           String          @unique
+  imageUrl        String?
+  banner          String?
+  description     String?
+  prerequisites   String?
+  category        String?
+  subcategory     String?
+  currency        Currency?
+  price           Int?
+  validityPeriod  Int?
+  introvideo      String?
+  openToEveryone  Boolean         @default(false)
+  slug            String
+  section         Section[]
+  purchasedBy     UserPurchases[]
+  // certificate     Certificate[]
+  certIssued      Boolean         @default(false)
+  @@index([category, subcategory, price, title]) 
+}
+
+// model Certificate {
+//   id       String @id @default(cuid())
+//   slug     String @default("certId")
+//   user     User   @relation(fields: [userId], references: [id])
+//   userId   Int
+//   course   Course @relation(fields: [courseId], references: [id])
+//   courseId Int
+
+//   @@unique([userId, courseId])
+// }
+
+model UserPurchases {
+  user       User     @relation(fields: [userId], references: [id])
+  userId     Int
+  course     Course   @relation(fields: [courseId], references: [id])
+  courseId   Int
+  assignedAt DateTime @default(now())
+
+  @@id([userId, courseId])
+}
+
+model Section {
+  id        Int       @id @default(autoincrement())
+  title     String
+  course    Course    @relation(fields: [courseId], references: [id])
+  courseId  Int
+  contents  Content[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  @@index([courseId,title])
+}
+
+model Content{
+  id             Int            @id @default(autoincrement())
+  type           ContentType    @default(LECTURE)
+  title          String     
+  description    String?
+  section        Section        @relation(fields: [sectionId], references: [id])
+  sectionId      Int
+  comments       Comment[]
+  videoProgress  VideoProgress[]
+  bookmark       Bookmark[]
+  // commentsCount  Int            @default(0)
+  quiz           Quiz?          
+  lecture        Lecture?      
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  @@index([sectionId, type])
+}
+
+model Quiz {
+  id        Int        @id @default(autoincrement())
+  questions Question[]
+  content   Content    @relation(fields: [contentId], references: [id])
+  contentId Int         @unique
+}
+
+model Question {
+  id        Int        @id @default(autoincrement())
+  quiz      Quiz       @relation(fields: [quizId], references: [id])
+  quizId    Int        
+  text      String
+  options   Option[]
+}
+
+model Option {
+  id        Int        @id @default(autoincrement())
+  question  Question   @relation(fields: [questionId], references: [id])
+  questionId Int
+  text      String
+  isCorrect Boolean    @default(false)
+}
+
+model Lecture {
+  id        Int        @id @default(autoincrement())
+  videoUrl  String?
+  article   String?
+  content   Content    @relation(fields: [contentId], references: [id])
+  contentId Int         @unique
+}
+
+model Bookmark {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  contentId Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   Content  @relation(fields: [contentId], references: [id])
+  createdAt DateTime @default(now())
+  @@unique([userId, contentId])
+}
+
+
+model admin{
+  id          Int               @id @default(autoincrement())
+  name        String            @unique
+  email       String            @unique
+  adminLevel  AdminLevel        @default(support_admin)
+  permissions Json?
+  lastLogin   DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  status      Status            @default(active)
+  notificationsEnabled Boolean  @default(true)
+  @@index([adminLevel,name])
+}
+
+model User{
+  id              Int             @id @default(autoincrement())
+  name            String?
+  username        String          @unique
+  password        String?
+  email           String          @unique
+  purchases       UserPurchases[]
+  videoProgress   VideoProgress[]
+  bookmarks       Bookmark[]
+  comments        Comment[]
+  // certificates    Certificate[]
+  // votes           Vote[]
+  // githubUser      UserGitHubLink? @relation("UserGithub")
+  refresh_token   String?
+  profilepicture  String?
+ // linkdinprofile  String?
+  educationLevel  EducationLevel?
+  schoolingYear   SchoolingYear?
+  schoolStream    SchoolStream?
+  degree          Degree?
+  studyYear       StudyYear?
+  specialization  Specialization?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  @@index([educationLevel]) 
+}
+
+model Instructor{
+  id              Int             @id @default(autoincrement())
+  name            String?
+  username        String         @unique
+  password        String?
+  email           String          @unique
+  // githubIns       InsGitHubLink?  @relation("InstructorGithub")
+  refresh_token   String?
+  profilepicture  String?
+  // linkdinProfile  String?
+  course          Course[] 
+  bio             String?        
+  contactNumber   String?        
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt    
+  qualification   Qualification[]
+  achievement     Achievement[]
+}
+
+model Achievement {
+  id           Int         @id @default(autoincrement())
+  title        String
+  referencepic String   
+  year         Int       
+  instructor   Instructor  @relation(fields: [instructorId], references: [id])
+  instructorId Int
+  @@index([instructorId, year]) 
+}
+
+model Qualification {
+  id           Int         @id @default(autoincrement())
+  title        String      
+  institution  String
+  year         Int       
+  instructor   Instructor  @relation(fields: [instructorId], references: [id])
+  instructorId Int
+  @@index([instructorId, year])    
+}
+
+// model InsGitHubLink {
+//   id           String      @id @default(cuid())
+//   instructorId Int         @unique
+//   instructor   Instructor  @relation("InstructorGithub", fields: [instructorId], references: [id], onDelete: Cascade)
+//   githubId     String
+//   username     String
+//   avatarUrl    String?
+//   access_token String
+//   profileUrl   String?
+//   createdAt    DateTime    @default(now())
+//   updatedAt    DateTime    @updatedAt
+// }
+
+// model UserGitHubLink {
+//   id           String   @id @default(cuid())
+//   userId       Int      @unique
+//   user         User     @relation("UserGithub", fields: [userId], references: [id], onDelete: Cascade)
+//   githubId     String
+//   username     String
+//   avatarUrl    String?
+//   access_token String
+//   profileUrl   String?
+//   createdAt    DateTime @default(now())
+//   updatedAt    DateTime @updatedAt
+// }
+
+model VideoProgress {
+  id               Int      @id @default(autoincrement())
+  userId           Int
+  contentId        Int
+  currentTimestamp Int
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content          Content  @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  markAsCompleted  Boolean  @default(false)
+  updatedAt        DateTime @default(now()) @updatedAt
+
+  @@unique([contentId, userId])
+}
+
+model Comment {
+  id           Int         @id @default(autoincrement())
+  content      String
+  commentType  CommentType @default(DEFAULT)
+ // approved     Boolean     @default(false)
+  contentId    Int
+  commentedOn  Content     @relation(fields: [contentId], references: [id])
+  parentId     Int?
+  parent       Comment?    @relation("ParentComment", fields: [parentId], references: [id])
+  children     Comment[]   @relation("ParentComment")
+  userId       Int
+  user         User        @relation(fields: [userId], references: [id])
+  // upvotes      Int         @default(0)
+  // downvotes    Int         @default(0)
+  // repliesCount Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  // votes        Vote[]
+  isPinned     Boolean     @default(false)
+}
+
+// model Vote {
+//   id         Int       @id @default(autoincrement())
+//   commentId  Int?
+//   comment    Comment?  @relation(fields: [commentId], references: [id])
+//   userId     Int
+//   user       User      @relation(fields: [userId], references: [id])
+//   voteType   VoteType
+//   createdAt  DateTime  @default(now())
+
+//   @@unique([commentId, userId])
+// }
