@@ -7,13 +7,13 @@ async function sendEmail({jobname,jobid,userId,cloudinaryUrl}) {
     try {
       console.log(`JobId:${jobid} JobName: ${jobname} , cloudinaryUrl: ${cloudinaryUrl} , userId:${userId}`)
       const response = await client.sendEmailWithTemplate({
-        From: "cse230001060@iiti.ac.in",
-        To: "paramsaxena1314@gmail.com",
+        From:process.env.SENDER_EMAIL,
+        To: process.env.RECEIVER_EMAIL,
         TrackOpens:true,
         
         // HtmlBody: "<strong>Hello</strong> dear Postmark user.",
         // TextBody: "Hello from Postmark!",
-        TemplateId: 38378821,
+        TemplateId: process.env.TEMPLATE_ID,
         TemplateModel: {
           product_url: "https://amber.com",
           product_name: jobid,
@@ -25,7 +25,7 @@ async function sendEmail({jobname,jobid,userId,cloudinaryUrl}) {
           trial_length: "1 Year",
           trial_start_date: new Date(),
           trial_end_date:new Date(),
-          support_email: "paramsaxena1314@gmail.com",
+          support_email: process.env.RECEIVER_EMAIL,
           sender_name: "AMBER limited",
           company_address: "DUBAI Burj Khalifa"
         },
@@ -43,13 +43,13 @@ async function sendEmail2({jobname,jobid,userId,publicId}) {
     try {
       console.log(`JobId:${jobid} JobName: ${jobname} , PublidId: ${publicId} , userId:${userId}`)
       const response = await client.sendEmailWithTemplate({
-        From: "cse230001060@iiti.ac.in",
-        To: "paramsaxena1314@gmail.com",
+        From:process.env.SENDER_EMAIL,
+        To: process.env.RECEIVER_EMAIL,
         TrackOpens:true,
         
         // HtmlBody: "<strong>Hello</strong> dear Postmark user.",
         // TextBody: "Hello from Postmark!",
-        TemplateId: 38378821,
+        TemplateId: process.env.TEMPLATE_ID,
         TemplateModel: {
           product_url: "https://amber.com",
           product_name: String(jobid),
@@ -61,7 +61,7 @@ async function sendEmail2({jobname,jobid,userId,publicId}) {
           trial_length: "1 Year",
           trial_start_date: new Date(),
           trial_end_date:new Date(),
-          support_email: "paramsaxena1314@gmail.com",
+          support_email: process.env.RECEIVER_EMAIL,
           sender_name: "AMBER limited",
           company_address: "DUBAI Burj Khalifa"
         },
@@ -80,9 +80,9 @@ async function databaseErrormail({errormsg,jobid,jobname,imageUrl,courseId,publi
   try{
     console.log(`JobId:${jobid} JobName: ${jobname} , PublidId: ${publicId} , courseId:${courseId}, ImageUrl:${imageUrl} , UploadPath:${uploadPath}`) 
   const response=await client.sendEmailWithTemplate({
-    "From": "cse230001060@iiti.ac.in",
-    "To": "paramsaxena1314@gmail.com",
-    "TemplateAlias": "password-reset",
+    "From":process.env.SENDER_EMAIL,
+    "To": process.env.RECEIVER_EMAIL,
+    "TemplateAlias": process.env.DATABASE_ERROR_ALIAS,
     "TemplateModel": {
      "product_url": "http://amber.com",
     "product_name": "AMBER",
@@ -94,7 +94,7 @@ async function databaseErrormail({errormsg,jobid,jobname,imageUrl,courseId,publi
     "database_table": `Course : ${courseId}`,
     "public_id": String(publicId),
     "upload_path": String(uploadPath),
-    "support_email": "cse230001060@iiti.ac.in",
+    "support_email":process.env.SENDER_EMAIL,
     "support_phone": "6261******",
     "timestamp": String(new Date()),
     "company_name": "AMBER limited",
@@ -116,9 +116,9 @@ async function cleanupErrormail({errormsg,jobid,jobname,courseId,publicId,resour
   try{
     console.log(`JobId:${jobid} JobName: ${jobname} , PublidId: ${publicId} , courseId:${courseId}, PublicID:${publicId} , UploadPath:${uploadPath}`)
     const response=client.sendEmailWithTemplate({
-      "From": "cse230001060@iiti.ac.in",
-      "To": "paramsaxena1314@gmail.com",
-      "TemplateAlias": "code-your-own-2",
+      "From":process.env.SENDER_EMAIL,
+      "To": process.env.RECEIVER_EMAIL,
+      "TemplateAlias": process.env.CLEANUP_ERROR_ALIAS,
       "TemplateModel": {
         "product_url": "http://amber.com",
         "product_name": "AMBER",
@@ -131,7 +131,7 @@ async function cleanupErrormail({errormsg,jobid,jobname,courseId,publicId,resour
         "existing_public_id": String(publicId),
         "timestamp": "timestamp_Value",
         "database_table": "Course",
-        "support_email": "cse230001060@iiti.ac.in",
+        "support_email":process.env.SENDER_EMAIL,
         "support_phone": "6261******",
         "company_name": "AMBER limited",
         "company_address": "200 Park Avenue, Manhattan, New York"
