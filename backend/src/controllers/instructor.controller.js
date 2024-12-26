@@ -6,6 +6,7 @@ import {amber,redisClient} from "../db/index.js";
 import {uploadBanner,uploadContentVideo,uploadPromoVideo,uploadThumbnail,deletePromo,deleteBanner,uploadProfile,deleteProfile} from "../utils/cloudinary.js"
 import {course_basics_upload,profile_upload} from '../queue/ins_queue.js'
 import { json } from "express";
+import { processOperations } from "../utils/course.js";
 
 const JobStatus = {
   PENDING: 'pending',
@@ -17,6 +18,8 @@ const JobStatus = {
   CLEANED_UP: 'cleaned_up',
   FAILED: 'failed' 
 };
+
+
 
 const validateSectionData = (data,courseId) => {
     const errors = [];
@@ -498,7 +501,7 @@ const allcourses=asyncHandler(async(req,res)=>{
     // Log the error for debugging
     console.log("Error retrieving courses:", error);
 
-    // Handle specific Prisma errors
+    // Handle specific amber errors
     if (error.code === 'P2002') {
       return res.status(409).json(
         new ApiResponse(409, null, "Conflict in retrieving courses")
@@ -516,14 +519,12 @@ const allcourses=asyncHandler(async(req,res)=>{
 const getcoursebasics=asyncHandler(async(req,res)=>{
   const courseId =Number(req.params.courseId)
   if(!courseId ||isNaN(courseId)){
-    return res.status(400).json(
-      new ApiResponse(400, null, "Valid Course ID is required")
-    );
+    throw new ApiError(400, "Valid Course ID is required")
+    
   }
   const user =req.user
   try{ 
-  const hashkey=await redisClient.exists(`courses:${courseId}:basics`)  
-  if(!hashkey){
+ 
   const course=await amber.course.findUnique({
     where:{
         id:courseId,
@@ -544,24 +545,15 @@ if (!course) {
     new ApiResponse(404, null, "Course not found or you don't have access")
   );
 }
+const response=await redisClient.hGetAll(`courses:${course.id}:basics:job`)
+const normalObject = { ...response };
 return res.status(200).json(
-  new ApiResponse(200,course,user)
-);}
-else if(hashkey){
-  
-  const response=await redisClient.get(`courses:${courseId}:basics`)
-  const course=JSON.parse(response)
- 
-  if(course.data.insId!=user.id){
-    return res.status(404).json(
-      new ApiResponse(404, null, "You don't have access")
-    );
-  }
-  return res.status(200).json(
-    new ApiResponse(200,course,"Course data provided sucessfully")
-  )
-
-}
+  new ApiResponse(200,{
+    course,
+    user,
+    res:normalObject
+  },"user data")
+);
 
 
 }catch (error) {
@@ -572,7 +564,7 @@ console.error("Error retrieving course basics:", {
   stack: error.stack
 });
 
-// Handle specific Prisma errors
+// Handle specific amber errors
 switch (error.code) {
   
   case 'P2025':
@@ -593,6 +585,9 @@ const savecoursebasics=asyncHandler(async(req,res)=>{
  
     const courseId =Number(req.params.courseId)
     const user=req.user
+    const thumbnail_delete=req.header('thumbnail_delete') === 'true';
+    const introvideo_delete=req.header('introvideo_delete') === 'true';
+    
     const updates = {};
     const {
       title,
@@ -660,19 +655,27 @@ const savecoursebasics=asyncHandler(async(req,res)=>{
     });
     
     if (updatedCourse) {
-      const redisData = {
-        data: updatedCourse,
-        thumbnail_response:  null,
-        introvideo_response:  null
+      const APIResponse={
+        data:updatedCourse,
+        thumbnailResponse:null,
+        introvideoResponse:null
+      }
+      const is_job=await redisClient.exists(`courses:${updatedCourse.id}:basics:job`)
+      let data;
+      if(is_job){
+         const info=await redisClient.hGetAll(`courses:${updatedCourse.id}:basics:job`) 
+         data={...info} 
+         console.log(data)  
       }
       
-      const set_value=await redisClient.set(`courses:${updatedCourse.id}:basics`,JSON.stringify(redisData))
-      console.log(`Set_value: ${set_value}`)
        // Image upload handling
-    if (req.files?.image) {
+    if(req.files?.image || thumbnail_delete){   
+    if(data?.thumbnail===JobStatus.UPLOADING){
+      APIResponse.thumbnailResponse='Wait until previous task is finished'
+    }else {
       let publicId
-      const filePath=req.files.image[0].path
-      const uploadPath=`courses/${courseId}/thumbnail`
+      const filePath=thumbnail_delete? null : req.files.image[0].path
+      const uploadPath=thumbnail_delete? null :`courses/${courseId}/thumbnail`
       const resourceType='image'
     // Prepare cleanup for existing image
     if (existingCourse.imageUrl) {
@@ -689,22 +692,32 @@ const savecoursebasics=asyncHandler(async(req,res)=>{
     }
     publicId=extractPublicId(existingCourse.imageUrl)
   }
+ 
   const response=await course_basics_upload.add(`Thumnail-upload-${courseId}`,{
     filePath, 
     resourceType,
     courseId,  
     uploadPath,
     publicId,
-    status:'uploading'
+    status:'uploading',
+    to_delete:thumbnail_delete
   })
   console.log(`Course thumnail upload id: ${response.id}`)
-}
+  if(response){
+    APIResponse.thumbnailResponse=JobStatus.UPLOADING
+    const set_value=await redisClient.hSet(`courses:${updatedCourse.id}:basics:job`,'thumbnail',JobStatus.UPLOADING)
+    console.log(set_value)
+  }
+}}
 
   // Intro video handling
-    if (req.files?.introvideo) {
+    if(req.files?.introvideo || introvideo_delete){
+    if(data?.introvideo===JobStatus.UPLOADING){
+      APIResponse.introvideoResponse="Wait untill previous task is completed"
+    }else{
     let publicId
-      const filePath=req.files.introvideo[0].path
-      const uploadPath=`courses/${courseId}/promo`
+      const filePath=introvideo_delete? null : req.files.introvideo[0].path
+      const uploadPath=introvideo_delete? null : `courses/${courseId}/promo`
       const resourceType='video'
     // Prepare cleanup for existing image
     if (existingCourse.introvideo) {
@@ -727,15 +740,20 @@ const savecoursebasics=asyncHandler(async(req,res)=>{
     courseId,  
     uploadPath,
     publicId,
-    status:'uploading'
+    status:'uploading',
+    to_delete:introvideo_delete
   })
   console.log(`Course promo uploadid: ${response.id}`)
+  if(response){
+    APIResponse.introvideoResponse=JobStatus.UPLOADING
+    const set_value=await redisClient.hSet(`courses:${updatedCourse.id}:basics:job`,'introvideo',JobStatus.UPLOADING)
+    console.log(set_value)
   }
+  }}
 
   
-  
   return res.status(200).json(
-        new ApiResponse(200, "Course basics updation accepted successfully")
+        new ApiResponse(200,APIResponse, "Course basics updation accepted successfully")
       );
     }
 
@@ -820,13 +838,25 @@ const getuser=asyncHandler(async(req,res)=>{
 const uploadpic = asyncHandler(async (req, res) => {
   try {
       const user = req.user;
+      const to_delete=req.header('to_delete') === 'true';
+      const hashkey=await redisClient.exists(`instructors:profile:${user.id}:job`)
+      if(hashkey){
+      const data=await redisClient.get(`instructors:profile:${user.id}:job`)
+      const cache=JSON.parse(data);
+      if(cache.profilepic===JobStatus.UPLOADING){
+        return res.status(200).json(
+          new ApiResponse(200,user,"Wait until previous task is finished")
+        )
+      }
+      
+    }
       let publicId
-      if (!req.file) {
+      if (!req.file && !to_delete) {
           throw new ApiError(400, "Profile picture file is required");
       }
 
-      const profilePictureLocalPath = req.file.path;
-      console.log("Local file path:", profilePictureLocalPath);
+      // const profilePictureLocalPath = req.file?.path;
+      // console.log("Local file path:", profilePictureLocalPath);
 
       // Get current user
 
@@ -845,15 +875,20 @@ const uploadpic = asyncHandler(async (req, res) => {
          publicId = extractPublicId(user.profilepicture)
         console.log(publicId)
     }
+    let response;
       // Upload new image
-      const response=await profile_upload.add(`profile-upload-${user.id}`,{
-        filePath:profilePictureLocalPath, 
+     
+     const jobData = {
+        filePath: to_delete ? null : req.file?.path ,
         publicId,
-        folderpath:`profilePictures/instructors/${user.id}`,
-        userId:user.id,
-        status:'uploading'
-      })
-      
+        folderpath: to_delete ? null : `profilePictures/instructors/${user.id}`,
+        userId: user.id,
+        status: JobStatus.UPLOADING,
+        to_delete
+      };
+  
+     response = await profile_upload.add(`profile-upload-${user.id}`, jobData);
+  
 
       console.log(response)
       console.log(`userid: ${user.id}`)
@@ -882,6 +917,99 @@ const uploadpic = asyncHandler(async (req, res) => {
   }
 });
 
+const getgoals= asyncHandler(async(req,res)=>{
+
+})
+
+const savegoals=asyncHandler(async (req, res) => {
+  const courseId =Number(req.params.courseId)
+  const user=req.user
+  const { prerequisites = [], learnings = [] } = req.body;
+  if(!courseId ||isNaN(courseId)){  
+      throw new ApiError(400, "Valid Course ID is required")
+  }
+
+  try {
+    const existingCourse = await amber.course.findFirst({
+      where:{
+        id:courseId,
+        insId:user.id
+      },
+      select:{
+        id:true,
+        imageUrl:true,
+        introvideo:true
+      }
+    })
+    if (!existingCourse) {    
+       throw new ApiError(404, "Course not found or you aren't authorised")     
+    }
+
+    let prerequisitesMapper, learningsMapper;
+    // await amber.$transaction(async (amber) => {
+      [prerequisitesMapper, learningsMapper] = await Promise.all([
+        processOperations(amber, 'prerequisites', courseId, prerequisites),
+        processOperations(amber, 'learnings', courseId, learnings)
+      ]);
+    //});
+    
+    // Fetch updated data
+    const [updatedPrerequisites, updatedLearnings] = await Promise.all([
+      amber.prerequisites.findMany({
+        where: { courseId },
+        orderBy: { orderId: 'asc' }
+      }),
+      amber.learnings.findMany({
+        where: { courseId },
+        orderBy: { orderId: 'asc' }
+      })
+    ]);
+
+    return res.json(
+      new ApiResponse(200, {
+        prerequisites: updatedPrerequisites,
+        learnings: updatedLearnings,
+        idMappings: {
+          prerequisites: Object.fromEntries(prerequisitesMapper.mapping),
+          learnings: Object.fromEntries(learningsMapper.mapping)
+        }
+      }, "Goals updated successfully")
+    );
+
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+  }
+  
+  if (error.code === 'P2002') {
+      throw new ApiError(400, "Duplicate order number detected", 
+          ["Each item must have a unique order number within the course"]);
+  }
+
+  // Map specific error messages to appropriate API errors
+  const errorMessage = error.message.toLowerCase();
+  if (errorMessage.includes('order cannot be less than 1')) {
+      throw new ApiError(400, "Invalid order value", 
+          ["Order number must be greater than 0"]);
+  }
+  if (errorMessage.includes('order cannot exceed total items')) {
+      throw new ApiError(400, "Invalid order value", 
+          ["Order number exceeds the maximum allowed value"]);
+  }
+  if (errorMessage.includes('item with order') && errorMessage.includes('already exists')) {
+      throw new ApiError(400, "Duplicate order number", 
+          ["Each item must have a unique order number"]);
+  }
+  if (errorMessage.includes('not found')) {
+      throw new ApiError(404, error.message);
+  }
+
+  // Generic error for unexpected cases
+  throw new ApiError(500, "An unexpected error occurred while saving goals", 
+      [error.message]);
+
+  }
+});
 
 const createCourse=asyncHandler(async(req,res)=>{
       // Store uploaded file URLs for rollback if needed
@@ -1587,6 +1715,8 @@ const updateCourse = asyncHandler(async (req, res) => {
     allcourses,
     getcoursebasics,
     savecoursebasics,
+    savegoals,
+    getgoals,
     uploadpic,
     getpic,
     getuser,

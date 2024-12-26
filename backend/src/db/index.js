@@ -25,8 +25,9 @@ if (process.env.NODE_ENV !== 'production') globalForRedis.redis = redisClient;
 const createPrismaClient = () => {
   const client = new PrismaClient();
   const clientWithExtensions=client
-  // .$extends(withOptimize({ apiKey: process.env.OPTIMIZE_API_KEY }))
-  // .$extends(withAccelerate());
+  //.$extends(withOptimize({ apiKey: process.env.OPTIMIZE_API_KEY })).$extends(withAccelerate());
+ 
+  
   const extensions = clientWithExtensions.$options?.extensions;
   console.log("Prisma client extensions status:", {
     hasExtensions: Boolean(extensions),

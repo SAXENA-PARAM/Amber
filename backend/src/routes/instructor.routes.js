@@ -12,7 +12,9 @@ import {
     getuser,
     allcourses,
     getcoursebasics,
-    savecoursebasics
+    savecoursebasics,
+    getgoals,
+    savegoals,
 } from "../controllers/instructor.controller.js";
 import {upload}from "../middlewares/multer.middleware.js";
 import { verifyJWTw,verifyJWTa,firstJWTw,firstJWTa} from "../middlewares/auth.insmiddleware.js";
@@ -47,6 +49,8 @@ router.route("/app/courses/:courseId/manage/basics/save").patch(verifyJWTa,uploa
   {name: 'image', maxCount:1},
   {name: 'introvideo' , maxCount:1}
 ]),savecoursebasics)
+router.route("/web/courses/:courseId/manage/goals").get(verifyJWTw,getgoals)
+router.route("/web/courses/:courseId/manage/goals/save").post(verifyJWTw,savegoals)
 router.route("/web/course/create").post(verifyJWTw,upload.fields([
     { name: 'image', maxCount: 1 },
     { name: 'banner', maxCount: 1 },

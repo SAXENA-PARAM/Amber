@@ -39,7 +39,9 @@ const upload_profile=new Worker('instructor-profile-upload',async job=>{
         folderpath,
         publicId,
         userId,
-        status
+        to_delete,
+        status,
+        
       } = job.data;
       try {
         // await job.updateData({ 
@@ -49,49 +51,71 @@ const upload_profile=new Worker('instructor-profile-upload',async job=>{
         let uploadResult;
         console.log(`Started processing for profile of ${userId}`)
 
-        if (filePath) {
-          uploadResult = await uploadProfile(filePath,folderpath);
-          if (!uploadResult) throw new Error('Upload failed');
-         
-          await job.updateData({ 
-            ...job.data, 
-            status: JobStatus.UPLOADED,
-            secure_url:uploadResult.secure_url
-          });
-            console.log(uploadResult.secure_url)
-            console.log(`Completed  profile upload on cloudinary for ${userId} and upload info:${uploadResult}`)
-         
-         
-         
-          await job.updateData({ 
-            ...job.data, 
-            status: JobStatus.UPDATING,
-            secure_url:uploadResult.secure_url
-          });
-          try{
-          const updated_user = await amber.instructor.update({
-            where:{ id:userId },
-            data:{ profilepicture:uploadResult.secure_url }})
-           if(updated_user){
-            const data=await redisClient.get(`instructors:profile:${userId}:job`)
-            let cache =JSON.parse(data);
-            cache.profilepic=JobStatus.UPDATED
-            let set_value=await redisClient.set(`instructors:profile:${userId}:job`,JSON.stringify(cache))
-            console.log(set_value) 
-           } 
-          }catch(error){
-            throw new Error('Database update failed')
-          }
-          
-          // if (!updated_user) throw new Error('Database update failed');  
-          
-          await job.updateData({ ...job.data, status: JobStatus.UPDATED});
-          console.log(`Completed uploading and updating profile for ${userId}`)
-            
         
-          }  else {
-          throw new Error('Invalid resource type');
-        }
+        if(to_delete){
+            try{
+              const updated_user = await amber.instructor.update({
+                where:{ id:userId },
+                data:{ profilepicture:null}})
+               if(updated_user){
+                const data=await redisClient.get(`instructors:profile:${userId}:job`)
+                let cache =JSON.parse(data);
+                cache.profilepic=JobStatus.UPDATED
+                let set_value=await redisClient.set(`instructors:profile:${userId}:job`,JSON.stringify(cache))
+                console.log(set_value) 
+               } 
+              }catch(error){
+                throw new Error('Database update failed')
+              }
+              
+              // if (!updated_user) throw new Error('Database update failed');  
+              
+              await job.updateData({ ...job.data, status: JobStatus.UPDATED});
+              console.log(`Completed deleting and updating profile for ${userId}`)
+                
+          }
+        else {
+            uploadResult = await uploadProfile(filePath,folderpath);
+            if (!uploadResult) throw new Error('Upload failed');
+           
+            await job.updateData({ 
+              ...job.data, 
+              status: JobStatus.UPLOADED,
+              secure_url:uploadResult.secure_url
+            });
+              console.log(uploadResult.secure_url)
+              console.log(`Completed  profile upload on cloudinary for ${userId} and upload info:${uploadResult}`)
+           
+           
+           
+            await job.updateData({ 
+              ...job.data, 
+              status: JobStatus.UPDATING,
+              secure_url:uploadResult.secure_url
+            });
+            try{
+            const updated_user = await amber.instructor.update({
+              where:{ id:userId },
+              data:{ profilepicture:uploadResult.secure_url }})
+             if(updated_user){
+              const data=await redisClient.get(`instructors:profile:${userId}:job`)
+              let cache =JSON.parse(data);
+              cache.profilepic=JobStatus.UPDATED
+              let set_value=await redisClient.set(`instructors:profile:${userId}:job`,JSON.stringify(cache))
+              console.log(set_value) 
+             } 
+            }catch(error){
+              throw new Error('Database update failed')
+            }
+            
+            // if (!updated_user) throw new Error('Database update failed');  
+            
+            await job.updateData({ ...job.data, status: JobStatus.UPDATED});
+            console.log(`Completed uploading and updating profile for ${userId}`)
+              
+          
+            } 
+        
 
         
       } catch (error) {
@@ -309,7 +333,8 @@ const upload_course_basics=new Worker('course-basics-upload',async job=>{
         courseId,  
         uploadPath,
         publicId,
-        status
+        status,
+        to_delete
         } = job.data;
        
         try {
@@ -320,13 +345,41 @@ const upload_course_basics=new Worker('course-basics-upload',async job=>{
           let uploadResult;
           console.log(`Started processing for course of ${courseId}`)
   
-          if (filePath) {
-            if(resourceType==='image'){
-              const data=await redisClient.get(`courses:${courseId}:basics`);  
-              let cache=JSON.parse(data);
-              cache.thumbnail_response="Thumbnail Upload in progress"
-              let set_value=await redisClient.set(`courses:${courseId}:basics`,JSON.stringify(cache))
-              console.log(set_value)  
+          if(to_delete){
+            try{
+              if(resourceType==='image'){
+                const updated_course = await amber.course.update({
+                where:{ id:courseId },
+                data:{ imageUrl:null }})
+              
+              let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'thumbnail',JobStatus.UPDATED)
+              console.log(set_value)
+              }
+              else if(resourceType==='video'){
+              
+              const updated_course = await amber.course.update({
+                where:{ id:courseId },
+                data:{ introvideo:null }})
+              
+                let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'introvideo',JobStatus.UPDATED)
+                console.log(set_value)
+              } 
+
+              await job.updateData({ ...job.data, status: JobStatus.UPDATED});
+              if(resourceType==='image'){
+              console.log(`Completed uploading and updating thumbnail for ${courseId}`)}
+              else if(resourceType==='video'){
+                console.log(`Completed uploading and updating promo-video for ${courseId}`)}
+             
+            }catch(error){
+              throw new Error('Database update failed')
+            }
+            
+            // if (!updated_user) throw new Error('Database update failed');  
+            
+           
+          }else{
+            if(resourceType==='image'){ 
             uploadResult = await uploadThumbnail(filePath,uploadPath);
             if (!uploadResult) throw new Error('Upload failed');
            
@@ -338,12 +391,7 @@ const upload_course_basics=new Worker('course-basics-upload',async job=>{
               console.log(uploadResult.secure_url)
               console.log(`Completed  thumbnail upload on cloudinary for ${courseId} and upload info:${uploadResult}`)
           }
-          else if(resourceType==='video'){
-            const data=await redisClient.get(`courses:${courseId}:basics`);  
-            let cache=JSON.parse(data);
-            cache.introvideo_response="Promo-Video Upload in progress"
-            let set_value=await redisClient.set(`courses:${courseId}:basics`,JSON.stringify(cache))
-            console.log(set_value)
+            else if(resourceType==='video'){
             uploadResult = await uploadPromoVideo(filePath,uploadPath);
             if (!uploadResult) throw new Error('Upload failed');
            
@@ -356,34 +404,30 @@ const upload_course_basics=new Worker('course-basics-upload',async job=>{
               console.log(`Completed promo-video upload on cloudinary for ${courseId} and upload info:${uploadResult}`)
           }
            
-
-           
             await job.updateData({ 
               ...job.data, 
               status: JobStatus.UPDATING,
               secure_url:uploadResult.secure_url
             });
-            try{
+
+          try{
               if(resourceType==='image'){
-                const data=await redisClient.get(`courses:${courseId}:basics`);  
-                let cache=JSON.parse(data);
-                cache.data.imageUrl=uploadResult.secure_url;
-                cache.thumbnail_response="Thumbnail Uploaded Sucessfully";
-                let set_value=await redisClient.set(`courses:${courseId}:basics`,JSON.stringify(cache))
+                const updated_course = await amber.course.update({
+                where:{ id:courseId },
+                data:{ imageUrl:uploadResult.secure_url }})
+                
+                let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'thumbnail',JobStatus.UPDATED)
                 console.log(set_value)
-            const updated_course = await amber.course.update({
-              where:{ id:courseId },
-              data:{ imageUrl:uploadResult.secure_url }})}
-             else if(resourceType==='video'){
-              const data=await redisClient.get(`courses:${courseId}:basics`);  
-              let cache=JSON.parse(data);
-              cache.data.introvideo=uploadResult.secure_url
-              cache.introvideo_response="Promo-Video Uploaded Sucessfully"
-              let set_value=await redisClient.set(`courses:${courseId}:basics`,JSON.stringify(cache))
-              console.log(set_value)
+              }
+              else if(resourceType==='video'){
+              
               const updated_course = await amber.course.update({
                 where:{ id:courseId },
-                data:{ introvideo:uploadResult.secure_url }})}
+                data:{ introvideo:uploadResult.secure_url }})
+              
+                let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'introvideo',JobStatus.UPDATED)
+                console.log(set_value)
+              } 
             }catch(error){
               throw new Error('Database update failed')
             }
@@ -396,12 +440,6 @@ const upload_course_basics=new Worker('course-basics-upload',async job=>{
             else if(resourceType==='video'){
               console.log(`Completed uploading and updating promo-video for ${courseId}`)}
             }
-              
-          
-             else {
-            throw new Error('Invalid resource type');
-          }
-  
           
         } catch (error) {
           if (error.message.includes('Database update failed')) {
@@ -410,17 +448,12 @@ const upload_course_basics=new Worker('course-basics-upload',async job=>{
   
         // For other errors (e.g., upload failure), set the job status to FAILED
         if(resourceType==='image'){
-          const data=await redisClient.get(`courses:${courseId}:basics`);  
-          let cache=JSON.parse(data);
-          cache.thumbnail_response="Thumbnail Upload Failed"
-          let set_value=await redisClient.set(`courses:${courseId}:basics`,JSON.stringify(cache))
+        
+          let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'thumbnail',JobStatus.FAILED)
           console.log(set_value)
         }
         else if(resourceType==='video'){
-          const data=await redisClient.get(`courses:${courseId}:basics`);  
-          let cache=JSON.parse(data);
-          cache.introvideo_response="Promo-video Upload Failed"
-          let set_value=await redisClient.set(`courses:${courseId}:basics`,JSON.stringify(cache))
+          let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'introvideo',JobStatus.FAILED)
           console.log(set_value)
         }
         await job.updateData({
@@ -500,17 +533,11 @@ upload_course_basics.on('failed', async (job, err) => {
   } else {
       // For other errors, ensure the job status is set to FAILED
       if(resourceType==='image'){
-        const data=await redisClient.get(`courses:${job.data.courseId}:basics`);  
-        let cache=JSON.parse(data);
-        cache.thumbnail_response="Thumbnail Upload Failed"
-        let set_value=await redisClient.set(`courses:${job.data.ourseId}:basics`,JSON.stringify(cache))
+        let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'thumbnail',JobStatus.FAILED)
         console.log(set_value)
       }
       else if(resourceType==='video'){
-        const data=await redisClient.get(`courses:${job.data.courseId}:basics`);  
-        let cache=JSON.parse(data);
-        cache.introvideo_response="Promo-video Upload Failed"
-        let set_value=await redisClient.set(`courses:${job.data.courseId}:basics`,JSON.stringify(cache))
+        let set_value=await redisClient.hSet(`courses:${courseId}:basics:job`,'introvideo',JobStatus.FAILED)
         console.log(set_value)
       }
       await job.updateData({
