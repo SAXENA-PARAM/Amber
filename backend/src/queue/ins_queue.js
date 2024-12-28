@@ -32,6 +32,12 @@ const profile_cleanup=new Queue('instructor-profile-cleanup',{connection:redisCo
 const profile_upload_dlq=new Queue('profile-upload-dlq',{connection:redisConfig})
 const profile_cleanup_dlq=new Queue('profile-cleanup-dlq',{connection:redisConfig})
 
+const course_goals_update=new Queue('course-goals-update',{connection:redisConfig})
+
+
+//PROFILE UPLOAD QUEUE AND WORKERS
+
+{
 const upload_profile=new Worker('instructor-profile-upload',async job=>{
   console.log(`Processing upload job: ${job.id}, Attempt: ${job.attemptsMade + 1}`);
     const { 
@@ -319,12 +325,12 @@ const cleanup_dlq_worker = new Worker('profile-cleanup-dlq', async job => {
         throw notificationError;
     }
 },{connection: redisConfig });
-
+}
 
 
 //COURSE BASICS QUEUE AND WORKERS
 
-
+{
 const upload_course_basics=new Worker('course-basics-upload',async job=>{
     console.log(`Processing course upload job: ${job.id}, Attempt: ${job.attemptsMade + 1}`);
       const { 
@@ -705,8 +711,119 @@ const dlq_course_basics_cleanup = new Worker('course-basics-cleanup-dlq', async 
           throw notificationError;
       }
   },{connection: redisConfig });
+}
+
+// PREREQUISITES QUEUE AND WORKER
+
+
+  async function createUpdateQueries (currentState, updates) {
+    // Create a set of IDs that need value updates
+    const idsToUpdate = new Set(updates.map(update => update.id));
+    
+    // Create update queries for all real IDs
+    const updateQueries = Object.entries(currentState)
+      .filter(([_, item]) => Number(item.id))
+      .map(([orderId, item]) => {
+        const query = {
+          where: { id: Number(item.id) },
+          data: {
+            orderId: Number(orderId)
+          }
+        };
+  
+        // Only add value if this id is in updates array
+        if (idsToUpdate.has(item.id)) {
+          query.data.value = item.value;
+        }
+  
+        return query;
+      });
+  
+    return updateQueries;
+  };
+  
+  async function createDeleteQuery(deletions, courseId)  {
+    // Only create delete query if there are items to delete
+    if (!deletions || deletions.length === 0) {
+      return null;
+    }
+  
+    return {
+      where: {
+        AND: [
+          { id: { in: deletions.map(Number) } },
+          { courseId: courseId }
+        ]
+      }
+    };
+  };
+
+
+const update_course_goals=new Worker('course-goals-update',async job=>{
+    console.log(`Processing course upload job: ${job.id}, Attempt: ${job.attemptsMade + 1}`);
+      const { 
+        currentState,
+        tempToRealIdMap,
+        updates,
+        deletions,
+        courseId
+        } = job.data;
+       
+        try {
+          
+         const updateQueries=await createUpdateQueries(currentState,updates)
+         if (updateQueries.length > 0) {
+          await Promise.all(
+              updateQueries.map(query => 
+                  amber.prerequisites.update(query)
+              )
+          );
+      }
+      if(deletions && deletions.length>0){
+         const deleteQuery=await createDeleteQuery(deletions,courseId)
+         if (deleteQuery) {
+          await amber.prerequisites.deleteMany(deleteQuery);
+      }}
+      console.log(`Successfully processed course goals update for course ${courseId}`);
+        } catch (error) {
+          console.error(`Failed to process course goals update for course ${courseId}:`, error);
+          throw error;
+        } 
+  },{
+    connection: redisConfig,
+      attempts: 3, // Retry up to 3 times
+      backoff: {
+          type: 'exponential', // Exponential backoff
+          delay: 5000 // 5 seconds initial delay
+          }
+    })
+  
+  
+update_course_goals.on('completed',async(job)=>{
+      console.log(job.id)
+      console.log(job.data);
+      const { 
+        currentState,
+        tempToRealIdMap,
+        updates,
+        deletions,
+        courseId
+        } = job.data;
+      console.log("control reached to adding to cleanup queue")
+      const value=await redisClient.hGet(`courses:${courseId}:goals`,'jobid')
+      console.log(value)
+      if(value===job.id){
+        console.log(`jobid is equal`)
+        const setvalue=await redisClient.del(`courses:${courseId}:goals`)
+        console.log(setvalue)
+      }
+  
+  })
+
+
 
 export{
     course_basics_upload,
     profile_upload,
+    course_goals_update
 }

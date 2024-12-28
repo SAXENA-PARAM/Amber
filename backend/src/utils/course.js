@@ -1,4 +1,5 @@
-import { amber } from "../db/index.js";
+import { amber,redisClient } from "../db/index.js";
+import {ApiError} from '../utils/ApiError.js'
 
 class TempIdMapper {
     constructor() {
@@ -230,6 +231,63 @@ async function reorderAfterDelete(tx, type, courseId, deletedOrder) {
   }
 
 
+  async function handleRedisOperations(courseId, updatedCurrentState, jobId) {
+    try {
+      console.log(updatedCurrentState)
+      const redisKey = `courses:${courseId}:goals`;
+      await redisClient.multi()
+        .hSet(redisKey, 'updatedCurrentState',JSON.stringify(updatedCurrentState))
+        .hSet(redisKey, 'jobid', jobId)
+        .exec();
+    } catch (error) {
+      console.error('Redis operation failed:', error);
+      throw new ApiError(500, "Failed to update cache");
+    }
+  }
+  
+  function validateDeletions(deletions, existingIds, currentStateIds) {
+    if (!Array.isArray(deletions)) {
+      throw new ApiError(400, "Deletions must be an array");
+    }
+  
+    if (!deletions.every(id => typeof id === 'number')) {
+      throw new ApiError(400, "All deletion IDs must be numbers");
+    }
+  
+    if (!deletions.every(id => existingIds.has(id))) {
+      const invalidIds = deletions.filter(id => !existingIds.has(id));
+      throw new ApiError(400, `Some deletion IDs don't exist in the database: ${invalidIds.join(', ')}`);
+    }
+  
+    if (deletions.some(id => currentStateIds.has(id))) {
+      throw new ApiError(400, "Cannot delete IDs that are still in currentState");
+    }
+  }
+  
+  function validateUpdates(updates, existingIds, currentStateIds) {
+    if (!Array.isArray(updates)) {
+      throw new ApiError(400, "Updates must be an array");
+    }
+  
+    if (!updates.every(update => typeof update.id === 'number')) {
+      throw new ApiError(400, "All update IDs must be numbers");
+    }
+  
+    if (!updates.every(update => existingIds.has(update.id))) {
+      const invalidIds = updates
+        .filter(update => !existingIds.has(update.id))
+        .map(update => update.id);
+      throw new ApiError(400, `Some update IDs don't exist in the database: ${invalidIds.join(', ')}`);
+    }
+  
+    if (!updates.every(update => currentStateIds.has(update.id))) {
+      throw new ApiError(400, "Cannot update IDs that are not in currentState");
+    }
+  }  
+
 export{
-    processOperations
+    processOperations,
+    handleRedisOperations,
+    validateDeletions,
+    validateUpdates
 }  

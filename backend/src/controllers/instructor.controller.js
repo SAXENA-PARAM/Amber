@@ -4,9 +4,9 @@ import {ApiError} from "../utils/ApiError.js"
 import { ApiResponse } from "../utils/ApiResponse.js";
 import {amber,redisClient} from "../db/index.js";
 import {uploadBanner,uploadContentVideo,uploadPromoVideo,uploadThumbnail,deletePromo,deleteBanner,uploadProfile,deleteProfile} from "../utils/cloudinary.js"
-import {course_basics_upload,profile_upload} from '../queue/ins_queue.js'
+import {course_basics_upload,course_goals_update,profile_upload} from '../queue/ins_queue.js'
 import { json } from "express";
-import { processOperations } from "../utils/course.js";
+import { processOperations, validateDeletions, validateUpdates,handleRedisOperations } from "../utils/course.js";
 
 const JobStatus = {
   PENDING: 'pending',
@@ -1011,6 +1011,150 @@ const savegoals=asyncHandler(async (req, res) => {
   }
 });
 
+const savegoals2=asyncHandler(async(req,res)=>{
+  const courseId =Number(req.params.courseId)
+  const user=req.user
+  const {  currentState, // Full JSON state including items with temp IDs
+    additions = [], // Array of temp IDs to be added
+    updates = [], // Array of {id, content} objects
+    deletions = [] } = req.body;
+  if(!courseId ||isNaN(courseId)){  
+      throw new ApiError(400, "Valid Course ID is required")
+  }
+  try {
+    const existingCourse = await amber.course.findFirst({
+      where:{
+        id:courseId,
+        insId:user.id
+      },
+      select:{
+        id:true,
+        imageUrl:true,
+        introvideo:true
+      }
+    })
+    if (!existingCourse) {    
+       throw new ApiError(404, "Course not found or you aren't authorised")     
+    }
+
+     // Validate currentState order sequence
+    const orderIds = Object.values(currentState).map(item => Number(item.orderId)).sort((a, b) => a - b);
+    for (let i = 0; i < orderIds.length; i++) {
+      if (orderIds[i] !== i + 1) {
+        throw new ApiError(400, "Current state items must be in sequential order starting from 1")
+      }
+    }
+
+    const existingPrerequisites = await amber.prerequisites.findMany({
+      where: { courseId: courseId},
+      select: { id: true }
+    });
+
+    let existingIds
+    if(existingPrerequisites) existingIds = new Set(existingPrerequisites.map(p => p.id));
+    const currentStateIds = new Set(Object.values(currentState).map(item => 
+      typeof item.id === 'number' ? item.id : null
+    ).filter(id => id !== null));
+
+   let addedPrerequisites=[]
+   if(additions && additions.length>0){
+    const findItemByTempId = (tempId) => {return Object.values(currentState).find(item => item.id === tempId);     }
+    const itemsToAdd = additions.map(tempId => {
+      const item = findItemByTempId(tempId);
+      if (!item) {
+        throw new ApiError(400, `Item with temp ID ${tempId} not found in currentState`);
+      }
+      return {
+        tempId,
+        value: item.value,
+        orderId: Number(item.orderId)
+      };
+    });
+    addedPrerequisites = await amber.$transaction(async (prisma) => {
+      return Promise.all(
+        itemsToAdd.map(async (item) => {
+         
+          
+          const newPrerequisite = await prisma.prerequisites.create({
+            data: {
+              value: item.value,
+              orderId: Number(item.orderId),
+              courseId: courseId,
+            },
+          });
+
+          return { tempId:item.tempId, realId: newPrerequisite.id };
+        })
+      );
+    }, {
+      maxWait: 5000, // 5 seconds max wait time
+      timeout: 10000 // 10 seconds timeout
+    });
+  }
+
+    // Validate deletions array
+    if( deletions && deletions.length>0 && existingIds)validateDeletions(deletions,existingIds,currentStateIds)
+    // Validate updates array
+    if(updates && updates.length>0 && existingIds)validateUpdates(updates, existingIds, currentStateIds);
+
+    // Process additions - handle string temp IDs
+    
+
+    // Map temporary IDs to real IDs in currentState
+    const tempToRealIdMap = addedPrerequisites.length > 0 
+      ? Object.fromEntries(addedPrerequisites.map(({ tempId, realId }) => [tempId, realId]))
+      : {};
+
+     // Update currentState with real IDs
+     const updatedCurrentState = { ...currentState };
+     Object.entries(updatedCurrentState).forEach(([orderId, item]) => {
+       if (tempToRealIdMap[item.id]) {
+         updatedCurrentState[orderId] = {
+           ...item,
+           id: tempToRealIdMap[item.id]
+         };
+       }
+     });
+
+     const response= await course_goals_update.add(`Goals-Update-${courseId}`,{
+      currentState,
+      tempToRealIdMap,
+      updates,
+      deletions,
+      courseId
+     })
+
+     console.log(`Goals updates set with jobid: ${response.id}`)
+
+     await handleRedisOperations(existingCourse.id, updatedCurrentState, response.id);
+
+     return res.json(
+      new ApiResponse(200,{
+        currentState,
+        realId:tempToRealIdMap
+      },"Goals added to update process")
+     )
+
+  }catch(error){
+    console.error('SaveGoals Error:', error);
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    if (error.code === 'P2025') {
+      throw new ApiError(404, "Record to update not found");
+    }
+
+    if (error.code === 'P2003') {
+      throw new ApiError(400, "Foreign key constraint failed");
+    }
+
+    if (error.code === 'P2002') {
+      throw new ApiError(400, "Unique constraint failed");
+    }
+
+    throw new ApiError(500, "An error occurred while saving goals");
+  }})
+
 const createCourse=asyncHandler(async(req,res)=>{
       // Store uploaded file URLs for rollback if needed
       console.log("Reached controller")
@@ -1716,6 +1860,7 @@ const updateCourse = asyncHandler(async (req, res) => {
     getcoursebasics,
     savecoursebasics,
     savegoals,
+    savegoals2,
     getgoals,
     uploadpic,
     getpic,
