@@ -3,6 +3,9 @@ import cors from "cors"
 import cookieParser from "cookie-parser"
 import {ApiError} from './utils/ApiError.js'
 import expressStatusMonitor from 'express-status-monitor';
+import { GetUrl } from "./controllers/instructor.controller.js";
+
+
 
 const app = express()
 
@@ -26,8 +29,33 @@ app.use("/api/v1/course",courseRouter)
 app.use("/api/v1/instructor",insRouter)
 
 
+
+app.post("/getSignedUrl"  , async(req,res)=>{
+  try{
+    const {filetype , fileName}  = req.body ; 
+    const url = await GetUrl(filetype , fileName)
+    res.status(200).json({success  : true  , url : url})
+  }catch(e){
+    res.status(500).json({success  : false})
+  }
+
+})
+
+
+app.post("/TranscodeVideo"  , async(req,res)=>{
+  try {
+    const {fileurl ,filename  , videoname } = req.body ; 
+    console.log(fileurl)
+    console.log(filename)      
+    res.status(200).json({success : true})
+    
+  } catch (error) {
+    res.status(500).json({success  : false})
+  }
+})
+
+
 app.use((err, req, res, next) => {
-  // Check if the error is an instance of ApiError
   if (err instanceof ApiError) {
     res.status(err.statusCode).json({
       statusCode: err.statusCode,
@@ -37,7 +65,6 @@ app.use((err, req, res, next) => {
       message: err.message,
     });
   } else {
-    // Fallback for unexpected errors
     res.status(500).json({
       statusCode: 500,
       data: null,

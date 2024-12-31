@@ -7,7 +7,9 @@ import {uploadBanner,uploadContentVideo,uploadPromoVideo,uploadThumbnail,deleteP
 import {course_basics_upload,course_goals_update,profile_upload} from '../queue/ins_queue.js'
 import { json } from "express";
 import { processOperations, validateDeletions, validateUpdates,handleRedisOperations } from "../utils/course.js";
-
+import { S3Client, PutObjectCommand   } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import  { ECSClient, RunTaskCommand } from '@aws-sdk/client-ecs'
 const JobStatus = {
   PENDING: 'pending',
   UPLOADING: 'uploading',
@@ -1850,6 +1852,77 @@ const updateCourse = asyncHandler(async (req, res) => {
       throw new ApiError(500, "An unexpected error occurred while updating course");
     }
   }); 
+
+
+
+
+const client = new S3Client({
+  region: process.env.AWS_REGION  ,
+  credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID   ,
+      secretAccessKey: process.env.AWS_ACCESS_KEY_SECRET  
+  }
+})
+
+const ecsClient = new ECSClient({ 
+  region: process.env.AWS_REGION  ,
+  credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID  ,
+      secretAccessKey: process.env.AWS_ACCESS_KEY_SECRET  
+  }
+})
+
+const bucket = process.env.AWS_BUCKET 
+
+
+const GetUrl = async(filetype , fileName) =>{
+  const command = new PutObjectCommand({
+    Bucket: bucket,
+    Key: `uploads/${fileName}`, 
+    ContentType: filetype,
+  });
+  const signedUrl  = await getSignedUrl(client , command , { expiresIn: 900 })
+
+  return signedUrl ; 
+}
+
+
+const config = {
+  CLUSTER: process.env.AWS_CLUSTER  ,
+  TASK: process.env.AWS_TASK  
+}
+
+
+const runnewTask = async(videourl  , videoname  , full_video_name  )=>{
+  console.log(videourl)
+  const command = new RunTaskCommand({
+      cluster: config.CLUSTER  ,
+      taskDefinition: config.TASK  ,
+      launchType: 'FARGATE',
+      count: 1,
+      networkConfiguration: {
+          awsvpcConfiguration: {
+              assignPublicIp: 'ENABLED',
+              subnets: ['subnet-088117033df2f6c23', 'subnet-0ab3f4e0da7b896fc', 'subnet-09316e97b45c1a202'],
+              securityGroups: ['sg-0e8d35b6015762619']
+          }
+      },
+      overrides: {
+          containerOverrides: [
+              {
+                  name: process.env.AWS_TASK_IMAGE_NAME ,
+                  environment: [
+                      { name: 'S3_URL', value: videourl },
+                      { name: 'videoname', value: videoname },
+                      {name : "full_video_name"  , value : full_video_name}
+                  ]
+              }
+          ]
+      }
+  })
+  await ecsClient.send(command)
+}
+
   export {
     testing,
     signup,
@@ -1867,4 +1940,6 @@ const updateCourse = asyncHandler(async (req, res) => {
     getuser,
     createCourse,
     updateCourse,
+    GetUrl  , 
+    runnewTask
   }

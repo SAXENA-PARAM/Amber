@@ -20,6 +20,9 @@
     "prisma": "^5.22.0"
   },
   "dependencies": {
+    "@aws-sdk/client-ecs": "^3.716.0",
+    "@aws-sdk/client-s3": "^3.717.0",
+    "@aws-sdk/s3-request-presigner": "^3.717.0",
     "@prisma/client": "^5.22.0",
     "@prisma/extension-accelerate": "^1.2.1",
     "@prisma/extension-optimize": "^1.0.1",
